@@ -1,0 +1,56 @@
+# © Alexey A. Shcherbakov, 2025
+
+import numpy as np
+from matplotlib import pyplot as plt
+
+from fmm1d_mc import *
+
+# This is an example of grating reflection spectrum calculation
+# to reproduce the results of Fig. 1 of the paper by Philippe Lalanne, 
+# Jean Paul Hugonin, and Pierre Chavel, "Optical Properties of Deep 
+# Lamellar Gratings: A Coupled Bloch-Mode Insight," J. Lightwave Technol. 
+# 24, 2442- (2006)
+# https://opg.optica.org/jlt/abstract.cfm?uri=JLT-24-6-2442
+
+wavelength = 1.5
+polarization = 'p'
+angle_incidence = 1 # run calculations for 0 and 1
+epsilon_substrate = 1.0
+epsilon_superstrate = 1.0
+
+problem = DiffractionGratingProblem(wavelength, polarization, angle_incidence, epsilon_substrate, epsilon_superstrate)
+
+number_harmonics = 15
+fmm = FourierModalMethod(number_harmonics)
+
+period = 1.15
+fill_factors = np.array([0.4, 0.6], dtype=float)
+phc_epsilons = np.array([3.17**2, 1.0], dtype=complex)
+slab_thickness = 0.255
+grating = PhotonicCrystalSlab(period, fill_factors, phc_epsilons, slab_thickness)
+
+V_in = fmm.plane_wave('from above')
+
+wavelengths = np.linspace(1.2,2.0,801)
+reflectivity = np.zeros((2, np.size(wavelengths)), dtype=float)
+for i in range (0,np.size(wavelengths)):
+    problem.wavelength = wavelengths[i]
+
+    problem.polarization = 's'
+    S_TE = fmm.get_smatrix_phc_slab(problem, grating)[0]
+    V_out_TE = fmm.diffract(S_TE, V_in)
+    V_eff_TE = fmm.get_efficiencies(V_in, V_out_TE, problem, grating)
+    reflectivity[0,i] = V_eff_TE[1,fmm.central_harmonic]
+
+    problem.polarization = 'p'
+    S_TM = fmm.get_smatrix_phc_slab(problem, grating)[0]
+    V_out_TM = fmm.diffract(S_TM, V_in)
+    V_eff_TM = fmm.get_efficiencies(V_in, V_out_TM, problem, grating)
+    reflectivity[1,i] = V_eff_TM[1,fmm.central_harmonic]
+
+plt.plot(wavelengths, reflectivity[0,:], 'b-', label='TE polarization')
+plt.plot(wavelengths, reflectivity[1,:], 'r-', label='TM polarization')
+plt.xlabel('wavelength, um')
+plt.ylabel('reflectivity')
+plt.legend()
+plt.show()

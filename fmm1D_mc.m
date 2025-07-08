@@ -2,15 +2,15 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
                          %% DEMO SIMULATIONS %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-	% photonic crystal slab:
-phc_slab.period = 0.8;
-phc_slab.thickness = 0.4;
-phc_slab.period_fill_factors = [0.4, 0.6];
-phc_slab.period_epsilons = [1.0, 4.0];
+  % photonic crystal slab:
+phc_slab.period = 1.2;
+phc_slab.thickness = 0.24;
+phc_slab.period_fill_factors = [0.45, 0.55];
+phc_slab.period_epsilons = [2.25, 1.0];
 
-	% diffraction problem:
-angle_inc = 15;
-wavelength = 0.632;
+  % diffraction problem:
+angle_inc = 30;
+wavelength = 0.6328;
 polarization = 's';
 epsilon_substrate = 2.25;
 epsilon_superstrate = 1;
@@ -19,26 +19,28 @@ number_harmonics = 15;
 ic = ceil(number_harmonics/2); % zero harmonic index
 
 kx0 = sin(pi*angle_inc/180); % incident plane wave wavevector in-plane projection normalized by the vacuum wavenumber
-kG = wavelength / phc_slab.period; % grating reciprocal lattice basis vector normalized by the vacuum wavenumber
+kG = wavelength / phc_slab.period; % reciprocal lattice vector normalized by the vacuum wavenumber
 
-	% fill the structure difining the grating diffraction problem:
+  % fill the structure difining the grating diffraction problem:
 grating_diffraction_problem.number_harmonics = number_harmonics; % number of Fourier harmonics to consider in calculations
 grating_diffraction_problem.ic = ic; % zero harmonic index
 grating_diffraction_problem.kh = 2 * pi * phc_slab.thickness / wavelength; % normalized grating slab thickness
+grating_diffraction_problem.kx0 = kx0;
+grating_diffraction_problem.kG = kG;
 grating_diffraction_problem.kx = get_kx(number_harmonics, kx0, kG); % pre-calculate reciprocal lattice vectors
 grating_diffraction_problem.polarization = polarization;
 grating_diffraction_problem.epsilon_substrate = epsilon_substrate;
 grating_diffraction_problem.epsilon_superstrate = epsilon_superstrate;
 
-	% Fourier amplitudes of the permittivity and inverse permittivity functions:
+  % calculate Fourier amplitudes of the permittivity and inverse permittivity periodic functions:
 F = get_phc_epsilon_Fourier(grating_diffraction_problem, phc_slab);
-	% grating S-matrix:
+  % calculate grating S-matrix and eigen states of a corresponding photonic crystal:
 [S, beta, M, EV, HV] = get_smatrix_phcslab(grating_diffraction_problem, F);
-	% amplitude vector of an incident plane wave:
+  % fill an amplitude vector of an incident plane wave:
 Vin = plane_wave(grating_diffraction_problem, 'from above');
-	% amplitude vector of a diffracted field:
+  % calculate an amplitude vector of for the diffracted field:
 Vout = smatrix_diffract(S, Vin);
-	% vector of diffraction efficiencies:
+  % calculate a vector of diffraction efficiencies:
 Veff = get_diffraction_efficiencies(Vin, Vout, grating_diffraction_problem);
 
 fprintf('diffraction efficiensies:\n')
@@ -47,20 +49,27 @@ for order = -2:2
 																									real(Veff(dindex(order, grating_diffraction_problem),2)));	
 end
 
-	% local field
+  % calculate and plot a local field in the grating region:
 nx = 100;
 nz = 100;
+  % calculate the field inside the grating:
 [MFx, MFy, MFz] = get_local_field(grating_diffraction_problem, phc_slab, ...
-																	Vin, beta, M, EV, HV, F, nx, nz);
-[MFsubx, MFsuby, MFsubz, MFsupx, MFsupy, MFsupz] = get_near_field(Vin, Vout, ...
-											grating_diffraction_problem, nx, nz, grating_diffraction_problem.kh/nz);
-
+									Vin, beta, M, EV, HV, F, nx, nz);
+  % calculate the field below the grating:
+V = zeros(number_harmonics, 2);
+V(:,2) = Vout(:,1);
+[MFsubx, MFsuby, MFsubz] = get_layer_field(V, grating_diffraction_problem, grating_diffraction_problem.kh, epsilon_substrate, nx, nz);
+  % calculate the field above the grating:
+V(:,1) = Vout(:,2);
+V(:,2) = Vin(:,2) * exp(-1i*sqrt(epsilon_superstrate - kx0^2)*phc_slab.thickness*2.0*pi/wavelength);
+[MFsupx, MFsupy, MFsupz] = get_layer_field(V, grating_diffraction_problem, grating_diffraction_problem.kh, epsilon_superstrate, nx, nz);
+% concantenate the fields:
 MFx = [MFsubx, MFx, MFsupx];
 MFy = [MFsuby, MFy, MFsupy];
 MFz = [MFsubz, MFz, MFsupz];
 
-plot_x = (phc_slab.period / nx)*((1:nx)-0.5-ceil(nx/2));
-plot_z = (phc_slab.thickness / nz)*((1:3*nz)-0.5-ceil(nz/2));
+plot_x = (phc_slab.period / nx)*((1:nx)-1);
+plot_z = (phc_slab.thickness / nz)*((1:3*nz)-0.5-nz);
 [X, Z] = meshgrid(plot_x, plot_z);
 surf(X, Z, abs(MFy)', 'EdgeColor', 'none');
 view(2);
@@ -72,7 +81,7 @@ return;
                             %% FUNCTIONS %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-%% common functions: $$
+%% common functions: %%
 %{
 	get_kx: calculate reciprocal lattice vectors
 	input:
@@ -80,7 +89,7 @@ return;
 		kx0: Bloch wavenumber, normalized by the vaccum wavenumber
 		kG: reciprocal lattice basis vector, normalized by the vaccum wavenumber
 	output:
-		kx: column of reciprocal lattice vectors, normalized by the vacuum 
+		kx: a column of reciprocal lattice vectors, normalized by the vacuum 
 				wavenumber
 %}
 function kx = get_kx(n, kx0, kG)
@@ -416,20 +425,19 @@ end
 	output:
 		x_eps: values of inverse permittivyt in x_points
 %}
-function x_eps = get_phc_iepsilon(x_points, phc_slab)
-	if sum(abs(x_points) > 0.5) > 0
-		error('get_phc_epsilon: incorrect values of x_points')
-	end
+function x_eps = get_phc_iepsilon(nx, phc_slab)
+	x_points = linspace(0,nx-1,nx) / nx
+	x_points(x_points > 0.5) = x_points(x_points > 0.5) - 1.0
 
 	ff = phc_slab.period_fill_factors;
-	eps = phc_slab.period_epsilons;
+	epss = phc_slab.period_epsilons;
 
 	bounds = [cumsum(ff)-ff-0.5, 0.5]; % bound positions between layers
 
 	x_eps = x_points;
 	for i = 1:numel(ff)
 		ind = (x_points >= bounds(i)) & (x_points <= bounds(i+1));
-		x_eps(ind) = 1/eps(i);
+		x_eps(ind) = 1/epss(i);
 	end
 end
 
@@ -483,7 +491,8 @@ end
 		nx: number of points along a single period where to evaluate the fields
 		nz: number of points along the slab depth where to evaluate the fields
 	output parameters:
-		MFx, MFy, MFz: matrices of size (nx, nz) containing the field values
+		MFx, MFy, MFz: matrices of size (nx, nz) containing the field values at
+  gigen coordinate space points
 									H_x, E_y, H_z in case of s polarization
 									E_x, H_y, E_z in case of p polarization
 %}
@@ -495,16 +504,22 @@ function [MFx, MFy, MFz] = get_local_field(problem, phc_slab, Vin, beta, Ms, EV,
 	MFx = zeros(nx, nz);
 	MFy = zeros(nx, nz);
 	MFz = zeros(nx, nz);
-	
+
+	texp = (exp(2.0*1i*(problem.kx0/problem.kG/nx - ceil(nx/2)/nx) * linspace(0,nx-1,nx))).';
+
 	if strcmp(problem.polarization, 's')
 		for i = 1:nz
 			bexp1 = exp((1i*((i-0.5)/nz) * problem.kh) * (beta.'));
 			bexp2 = exp((1i*((nz-i+0.5)/nz) * problem.kh) * (beta.'));
 			Vp = Vmod(:,1) .* bexp1;
 			Vm = Vmod(:,2) .* bexp2;
-			MFy(:,i) = nx * ifftshift(ifft(EV*(Vp + Vm), nx)); % E_y
-			MFx(:,i) = nx * ifftshift(ifft(HV*(Vp - Vm), nx)); % H_x
-			MFz(:,i) = nx * ifftshift(ifft(diag(problem.kx)*EV*(Vp + Vm), nx)); % H_z
+			MFy(:,i) = nx * ifft(EV*(Vp + Vm), nx); % E_y
+			MFx(:,i) = nx * ifft(HV*(Vp - Vm), nx); % H_x
+			MFz(:,i) = nx * ifft(diag(problem.kx)*EV*(Vp + Vm), nx); % H_z
+
+			MFy(:,i) = MFy(:,i) .* texp;
+			MFx(:,i) = MFx(:,i) .* texp;
+			MFz(:,i) = MFz(:,i) .* texp;
 		end
 	elseif strcmp(problem.polarization, 'p')
 		ME = eye(n) / toeplitz(FE(n:2*n-1,1), FE(n:-1:1,1));
@@ -516,65 +531,58 @@ function [MFx, MFy, MFz] = get_local_field(problem, phc_slab, Vin, beta, Ms, EV,
 			bexp2 = exp((1i*((nz-i+0.5)/nz) * problem.kh) * (beta.'));
 			Vp = Vmod(:,1) .* bexp1;
 			Vm = Vmod(:,2) .* bexp2;
-			MFy(:,i) = nx * ifftshift(ifft(HV*(Vp - Vm), nx)); % H_y
-			MFx(:,i) = nx * (x_ieps).' .* ifftshift(ifft(MU*EV*(Vp + Vm), nx)); % E_x
-			MFz(:,i) = nx * ifftshift(ifft(-ME*diag(problem.kx)*HV*(Vp - Vm), nx)); % E_z
+			MFy(:,i) = nx * ifft(HV*(Vp - Vm), nx); % H_y
+			MFx(:,i) = nx * (x_ieps).' .* ifft(MU*EV*(Vp + Vm), nx); % E_x
+			MFz(:,i) = -nx * ifft(ME*diag(problem.kx)*HV*(Vp - Vm), nx); % E_z
+
+			MFy(:,i) = MFy(:,i) .* texp;
+			MFx(:,i) = MFx(:,i) .* texp;
+			MFz(:,i) = MFz(:,i) .* texp;
 		end
 	end
 end
 
 %{
 	get_near_field: calculate electromagnetic fields in the coordinate space
-				 in the homogeneous substrate and superstrate outside a grating slab
+				 in a homogeneous layer
 	input parameters:
-		Vinc, Vdif: Fourier amplitude vectors of the incident and diffracted
-					field
+		V: Fourier amplitude vector of the incident field: V(:,1) are
+  amplitudes of up-propagating plane waves at the bottom side of the layer,
+  and V(:,2) are amplitudes of down-propagating plane waves at the to side
+  of the layer
 		problem: structure defining a grating diffraction problem
+		kh: layer thickness normalized by the wavelength
+		epsilon: layer dielectric permittivity
 		nx: number of points along a single period where to evaluate the fields
 		nz: number of points along the slab depth where to evaluate the fields
-		kdh: distance between z slices normalized by the vacuum wavenumber
 	output parameters:
-		MFsubx, MFsuby, MFsubz, MFsupx, MFsupy, MFsupz: matrices of size (nx, nz) containing the field values
-														in the substrate and superstrate
+		MFx, MFy, MFz: matrices of size (nx, nz) containing the field values
 									H_x, E_y, H_z in case of s polarization
 									E_x, H_y, E_z in case of p polarization
 %}
-function [MFsubx, MFsuby, MFsubz, MFsupx, MFsupy, MFsupz] = get_near_field(Vinc, Vdif, ...
-						problem, nx, nz, kdh)
+function [MFx, MFy, MFz] = get_layer_field(V, problem, kh, epsilon, nx, nz)
 	kx = problem.kx;
-	kz1 = (get_kz(kx, problem.epsilon_substrate)).';
-	kz2 = (get_kz(kx, problem.epsilon_superstrate)).';
+	kz = (get_kz(kx, epsilon)).';
 	if strcmp(problem.polarization, 's')
-		cz1 = 1;
-		cz2 = 1;
+		cz = 1;
 	elseif strcmp(problem.polarization, 'p')
-		cz1 = -(1/problem.epsilon_substrate);
-		cz2 = -(1/problem.epsilon_superstrate);
+		cz = -1/epsilon;
 	end
-	kzp1 = abs(cz1) * kz1;
-	kzp2 = abs(cz2) * kz2;
+	kzp = abs(cz) * kz;
 
-	MFsubx = zeros(nx, nz);
-	MFsuby = zeros(nx, nz);
-	MFsubz = zeros(nx, nz);
-	MFsupx = zeros(nx, nz);
-	MFsupy = zeros(nx, nz);
-	MFsupz = zeros(nx, nz);
-	
+	MFx = zeros(nx, nz);
+	MFy = zeros(nx, nz);
+	MFz = zeros(nx, nz);
+
+	kdh = kh/nz;
+
 	for k = 1:nz
-		kh = (k-0.5)*kdh;
-			% fields in the substrate
-		Vp = Vinc(:,1).*exp(-1i*kz1*kh);
-		Vm = Vdif(:,1).*exp(1i*kz1*kh);
-		MFsuby(:,nz+1-k) = nx * ifftshift(ifft((Vp + Vm), nx));
-		MFsubx(:,nz+1-k) = nx * ifftshift(ifft(kzp1.*(Vm - Vp), nx));
-		MFsubz(:,k) = cz1 * nx * ifftshift(ifft(diag(kx)*(Vp + Vm), nx));
-			% fields in the superstrate
-		Vm = Vinc(:,2).*exp(-1i*kz2*kh);
-		Vp = Vdif(:,2).*exp(1i*kz2*kh);
-		MFsupy(:,k) = nx * ifftshift(ifft((Vp + Vm), nx));
-		MFsupx(:,k) = nx * ifftshift(ifft(kzp2.*(Vm - Vp), nx));
-		MFsupz(:,k) = cz2 * nx * ifftshift(ifft(diag(kx)*(Vp + Vm), nx));
+		z = (k-0.5)*kdh;
+		Vm = V(:,2).*exp(1i*kz*(kh-z));
+		Vp = V(:,1).*exp(1i*kz*z);
+		MFy(:,k) = nx * ifft((Vp + Vm), nx);
+		MFx(:,k) = nx * ifft(kzp.*(Vm - Vp), nx);
+		MFz(:,k) = cz * nx * ifft(diag(kx)*(Vp + Vm), nx);
 	end
 end
 
